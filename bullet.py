@@ -1,4 +1,4 @@
-import sqlite3, sys
+import sqlite3, sys, os
 from flask import Flask, render_template, request, jsonify
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -121,7 +121,7 @@ def mark_as_read():
     if not ids:
         return jsonify({'status': 'error', 'message': 'No IDs provided'}), 400
 
-    conn = sqlite3.connect('/home/polarhive/.local/share/newsboat/cache.db')
+    conn = sqlite3.connect(f'/home/{os.getenv("USER")}/.local/share/newsboat/cache.db')
     cursor = conn.cursor()
     cursor.executemany("UPDATE rss_item SET unread = 0 WHERE id = ?", [(id,) for id in ids])
     conn.commit()
