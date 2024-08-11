@@ -8,12 +8,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --warning: #ff3b30;
             --success: #34c759;
             --info: #0377ff;
             --info-press: #1663e1;
             --dark: #222222;
-            --light: #ffffff
+            --light: #ffffff;
+            --error-bg: #ffe5e5;
+            --error-border: #ff4d4d;
         }
 
         body {
@@ -130,6 +131,15 @@
         .nav-button:hover {
             background-color: var(--info-press);
         }
+
+        .error-message {
+            background-color: var(--error-bg);
+            border: 1px solid var(--error-border);
+            color: var(--error-border);
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
     </style>
     <script>
         let currentGroupIndex = 0;
@@ -145,6 +155,12 @@
                 .then(data => {
                     const groupList = document.getElementById('group-list');
                     groupList.innerHTML = '';
+
+                    if (data.groups === undefined || data.groups.length === 0) {
+                        showError('No unread articles. Open newsboat.');
+                        return;
+                    }
+
                     data.groups.forEach((group, index) => {
                         const groupTitle = data.titles[group[0]];
                         const groupItem = document.createElement('li');
@@ -152,7 +168,8 @@
                         groupItem.onclick = () => showGroup(index);
                         groupList.appendChild(groupItem);
                     });
-                });
+                })
+                .catch(error => showError('Error updating groups: ' + error.message));
         }
 
         function showGroup(index) {
@@ -182,7 +199,8 @@
                     `;
                         contentArea.appendChild(articleDiv);
                     });
-                });
+                })
+                .catch(error => showError('Error showing group: ' + error.message));
         }
 
         function markAsRead(id) {
@@ -196,9 +214,15 @@
                     if (data.status === 'success') {
                         showGroup(currentGroupIndex);
                     } else {
-                        alert('Error marking article as read.');
+                        showError('Error marking article as read.');
                     }
-                });
+                })
+                .catch(error => showError('Error marking article as read: ' + error.message));
+        }
+
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.innerHTML = `<div class="error-message">${message}</div>`;
         }
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -234,6 +258,7 @@
         </div>
         <div class="content" id="content-area"></div>
     </div>
+    <div id="error-container" style="padding: 20px; max-width: 600px; margin: 0 auto;"></div>
 </body>
 
 </html>
