@@ -1,6 +1,8 @@
 import sqlite3
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import tkinter as tk
+from tkinter import scrolledtext
 
 # setup
 conn = sqlite3.connect('cache.db')
@@ -46,9 +48,34 @@ for i in range(len(contents)):
             visited.add(j)
     groups.append(group)
 
-for id, group in enumerate(groups):
-    print(f"Group {id + 1}:")
-    for entry in group:
-        print(f"Title: {titles[entry]}")
-        print(f"Content: {contents[entry]}")
+# GUI
+class RSSViewer(tk.Tk):
+    def __init__(self, groups, titles, contents):
+        super().__init__()
+        self.title("RSS Feed Groups")
+        self.geometry("800x600")
+        self.groups = groups
+        self.titles = titles
+        self.contents = contents
+        self.listbox = tk.Listbox(self, width=50, height=30)
+        self.listbox.pack(side=tk.LEFT, fill=tk.Y)
+        self.listbox.bind('<<ListboxSelect>>', self.on_select)
 
+        self.text_area = scrolledtext.ScrolledText(self, wrap=tk.WORD, width=80, height=30)
+        self.text_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        for idx, group in enumerate(groups):
+            self.listbox.insert(tk.END, f"Group {idx + 1}")
+
+    def on_select(self, event):
+        selected_idx = self.listbox.curselection()[0]
+        group = self.groups[selected_idx]
+        self.text_area.delete('1.0', tk.END)
+        for entry in group:
+            self.text_area.insert(tk.END, f"Title: {self.titles[entry]}\n")
+            self.text_area.insert(tk.END, f"Content: {self.contents[entry]}\n\n")
+            self.text_area.insert(tk.END, "="*80 + "\n\n")
+
+if __name__ == "__main__":
+    app = RSSViewer(groups, titles, contents)
+    app.mainloop()
