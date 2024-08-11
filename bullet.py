@@ -1,45 +1,35 @@
-import sqlite3, sys, os
-from flask import Flask, render_template, request, jsonify
+from sqlite3 import connect
+from os.path import expanduser
+from flask import Flask, jsonify, request, render_template
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+db_path = expanduser('~/.local/share/newsboat/cache.db')
+spam_path = expanduser('~/.local/share/newsboat/spam_keywords.txt')
+
 app = Flask(__name__)
 
-def load_spam_keywords(file_path):
-    with open(file_path, 'r') as file:
-        keywords = [line.strip() for line in file]
-    return keywords
-
 def is_spam(title, content, spam_keywords):
+    title_lower = title.lower()
+    content_lower = content.lower()
     for keyword in spam_keywords:
         variations = [keyword.lower(), f"#{keyword.lower()}"]
-        for variation in variations:
-            if variation in title.lower() or variation in content.lower():
-                return True
+        if any(variation in title_lower or variation in content_lower for variation in variations):
+            return True
     return False
 
 def fetch_data(spam_keywords):
-    conn = sqlite3.connect('/home/polarhive/.local/share/newsboat/cache.db')
+    conn = connect(db_path)
     cursor = conn.cursor()
     cursor.execute("SELECT id, title, author, url, content FROM rss_item WHERE unread = 1")
     rows = cursor.fetchall()
     conn.close()
 
-    titles = []
-    links = []
-    authors = []
-    contents = []
-    ids = []
+    ids, titles, links, authors, contents = [], [], [], [], []
 
-    n = len(rows)
+    if not rows:
+        return ids, titles, links, authors, contents
 
-    if n == 0:
-        print("No unread articles")
-        sys.exit()
-    
-    app.run(debug=True)
-
-    count = 0
     for row in rows:
         id, title, author, url, content = row
         if not is_spam(title, content, spam_keywords):
@@ -48,9 +38,6 @@ def fetch_data(spam_keywords):
             links.append(url)
             authors.append(author)
             contents.append(content)
-            count += 1
-        if count >= n:
-            break
 
     return ids, titles, links, authors, contents
 
@@ -59,15 +46,7 @@ def group_entries(contents, threshold):
         return []
 
     vectorizer = TfidfVectorizer(stop_words='english')
-    
-    try:
-        tfidf_matrix = vectorizer.fit_transform(contents)
-    except ValueError as e:
-        if str(e) == 'empty vocabulary; perhaps the documents only contain stop words':
-            return []
-        else:
-            raise
-
+    tfidf_matrix = vectorizer.fit_transform(contents)
     cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
     groups = []
@@ -88,46 +67,43 @@ def group_entries(contents, threshold):
 
 @app.route('/')
 def index():
-    spam_keywords_file = 'spam_keywords.txt'
-    spam_keywords = load_spam_keywords(spam_keywords_file)
-    ids, titles, links, _, contents = fetch_data(spam_keywords)
-    initial_groups = group_entries(contents, threshold=0.5)
-    
-    # Sort groups by size (largest groups first)
-    sorted_groups = sorted(enumerate(initial_groups), key=lambda x: len(x[1]), reverse=True)
-    sorted_groups = zip(*sorted_groups) if sorted_groups else ([], [])
-    
-    return render_template('index.html', groups=sorted_groups, titles=titles, contents=contents, links=links, ids=ids)
+    return render_template('index.html')
 
 @app.route('/update_groups', methods=['POST'])
 def update_groups():
-    threshold = float(request.form['threshold'])
-    spam_keywords_file = 'spam_keywords.txt'
-    spam_keywords = load_spam_keywords(spam_keywords_file)
-    ids, titles, links, contents = fetch_data(spam_keywords)
+    """
+    Update and return grouped articles based on the similarity threshold.
+    """
+    threshold = float(request.form.get('threshold', 0.5))
+
+    with open(spam_path, 'r') as f:
+        spam_keywords = [line.strip() for line in f]
+
+    ids, titles, links, authors, contents = fetch_data(spam_keywords)
     groups = group_entries(contents, threshold)
-    
-    # Sort groups by size (largest groups first)
-    sorted_groups = sorted(enumerate(groups), key=lambda x: len(x[1]), reverse=True)
-    
-    # Unzip the sorted groups
-    sorted_groups = zip(*sorted_groups) if sorted_groups else ([], [])
-    
-    return jsonify(groups=sorted_groups, titles=titles, contents=contents, links=links, ids=ids)
+
+    return jsonify({
+        'ids': ids,
+        'titles': titles,
+        'links': links,
+        'authors': authors,
+        'contents': contents,
+        'groups': groups
+    })
 
 @app.route('/mark_as_read', methods=['POST'])
 def mark_as_read():
-    ids = request.json.get('ids', [])
-    if not ids:
-        return jsonify({'status': 'error', 'message': 'No IDs provided'}), 400
+    ids_to_mark = request.json.get('ids', [])
+    if not ids_to_mark:
+        return jsonify({'error': 'No IDs provided'}), 400
 
-    conn = sqlite3.connect(f'/home/{os.getenv("USER")}/.local/share/newsboat/cache.db')
+    conn = connect(db_path)
     cursor = conn.cursor()
-    cursor.executemany("UPDATE rss_item SET unread = 0 WHERE id = ?", [(id,) for id in ids])
+    cursor.executemany("UPDATE rss_item SET unread = 0 WHERE id = ?", [(id,) for id in ids_to_mark])
     conn.commit()
     conn.close()
 
-    return jsonify({'status': 'success'})
+    return jsonify({'status': 'success', 'marked_ids': ids_to_mark})
 
 if __name__ == '__main__':
-    app.run(debug=False)
+    app.run(debug=True)
