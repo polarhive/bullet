@@ -4,24 +4,23 @@ from sklearn.metrics.pairwise import cosine_similarity
 import tkinter as tk
 from tkinter import scrolledtext
 
-# Function to read spam keywords from a text file
 def load_spam_keywords(file_path):
     with open(file_path, 'r') as file:
-        return [line.strip() for line in file]
+        keywords = [line.strip() for line in file]
+    return keywords
 
-# Function to check if a string contains any spam keywords
 def is_spam(title, content, spam_keywords):
     for keyword in spam_keywords:
-        if keyword.lower() in title.lower() or keyword.lower() in content.lower():
-            return True
+        variations = [keyword.lower(), f"#{keyword.lower()}"]
+        for variation in variations:
+            if variation in title.lower() or variation in content.lower():
+                return True
     return False
 
-# Load spam keywords from file
 spam_keywords_file = 'spam_keywords.txt'
 spam_keywords = load_spam_keywords(spam_keywords_file)
 
-# Setup
-conn = sqlite3.connect('cache.db')
+conn = sqlite3.connect('/home/polarhive/.local/share/newsboat/cache.db')
 cursor = conn.cursor()
 cursor.execute("SELECT * FROM rss_item")
 rows = cursor.fetchall()
@@ -32,8 +31,7 @@ authors = []
 timestamps = []
 contents = []
 
-# Cleanup
-n = 50
+n = len(rows)/10
 count = 0
 for row in rows:
     title = row[2]
