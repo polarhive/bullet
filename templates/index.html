@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bullet</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            display: flex; 
+            height: 100vh; 
+            margin: 0; 
+            background-color: #f4f4f4; 
+        }
+        .container { 
+            display: flex; 
+            flex: 1; 
+        }
+        .sidebar { 
+            width: 30%; 
+            padding: 20px; 
+            border-right: 1px solid #ddd; 
+            background-color: #fff; 
+            overflow-y: auto; 
+        }
+        .content { 
+            flex: 1; 
+            padding: 20px; 
+            background-color: #fff; 
+            overflow-y: auto; 
+        }
+        .article { 
+            border-radius: 8px; 
+            padding: 15px; 
+            margin-bottom: 20px; 
+            background-color: #fafafa; 
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); 
+            max-width: 100%; 
+            overflow: hidden; 
+        }
+        .article img {
+            max-width: 100%; 
+            height: auto; 
+            display: block; 
+            margin-bottom: 10px; 
+        }
+        .title { 
+            font-weight: 600; 
+            margin-bottom: 10px; 
+            font-size: 18px; 
+        }
+        .content-body { 
+            margin-top: 10px; 
+        }
+        .read-checkbox { 
+            margin-right: 10px; 
+        }
+        .slider-container { 
+            margin-bottom: 20px; 
+        }
+        .slider-container label { 
+            font-size: 16px; 
+            font-weight: 600; 
+        }
+        #group-list { 
+            list-style-type: none; 
+            padding: 0; 
+        }
+        #group-list li { 
+            padding: 10px; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            margin-bottom: 10px; 
+            background-color: #e0e0e0; 
+        }
+        #group-list li:hover { 
+            background-color: #d0d0d0; 
+        }
+        .nav-button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+            margin-top: 10px;
+        }
+        .nav-button:hover {
+            background-color: #45a049;
+        }
+    </style>
+    <script>
+        let currentGroupIndex = 0;
+        let threshold = 0.5;
+
+        function updateGroups() {
+            fetch('/update_groups', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ 'threshold': threshold })
+            })
+            .then(response => response.json())
+            .then(data => {
+                const groupList = document.getElementById('group-list');
+                groupList.innerHTML = '';
+                data.groups.forEach((group, index) => {
+                    const groupTitle = data.titles[group[0]];
+                    const groupItem = document.createElement('li');
+                    groupItem.textContent = `Group ${index + 1}: ${groupTitle}`;
+                    groupItem.onclick = () => showGroup(index);
+                    groupList.appendChild(groupItem);
+                });
+            });
+        }
+
+        function showGroup(index) {
+            currentGroupIndex = index;
+            const contentArea = document.getElementById('content-area');
+            contentArea.innerHTML = '';
+            fetch('/update_groups', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ 'threshold': threshold })
+            })
+            .then(response => response.json())
+            .then(data => {
+                const group = data.groups[index];
+                group.forEach(entry => {
+                    const articleDiv = document.createElement('div');
+                    articleDiv.classList.add('article');
+                    const title = data.titles[entry];
+                    const content = data.contents[entry];
+                    const link = data.links[entry];
+                    const id = data.ids[entry];
+
+                    articleDiv.innerHTML = `
+                        <div class="title">${title}</div>
+                        <div class="content-body">${content} <a href="${link}" target="_blank">Read More</a></div>
+                        <div><input type="checkbox" class="read-checkbox" id="read-${id}" onclick="markAsRead(${id})"> Mark as Read</div>
+                    `;
+                    contentArea.appendChild(articleDiv);
+                });
+            });
+        }
+
+        function markAsRead(id) {
+            fetch('/mark_as_read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: [id] })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    showGroup(currentGroupIndex);
+                } else {
+                    alert('Error marking article as read.');
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const thresholdSlider = document.getElementById('threshold');
+            thresholdSlider.addEventListener('input', () => {
+                document.getElementById('threshold-value').textContent = thresholdSlider.value;
+                threshold = thresholdSlider.value / 100;
+            });
+
+            document.getElementById('refresh-btn').addEventListener('click', () => {
+                updateGroups();
+            });
+
+            updateGroups();
+        });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="slider-container">
+                <label for="threshold">Similarity Threshold: <span id="threshold-value">50</span></label>
+                <input type="range" id="threshold" min="0" max="100" value="50">
+            </div>
+            <button id="refresh-btn" class="nav-button">Refresh</button>
+            <ul id="group-list">
+            </ul>
+        </div>
+        <div class="content" id="content-area">
+        </div>
+    </div>
+</body>
+</html>

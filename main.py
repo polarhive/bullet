@@ -1,10 +1,9 @@
-import sys
-import sqlite3
+import sqlite3, sys
+from flask import Flask, render_template, request, jsonify
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QListWidget, QTextEdit, QSlider, QLabel, QWidget
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+
+app = Flask(__name__)
 
 def load_spam_keywords(file_path):
     with open(file_path, 'r') as file:
@@ -33,6 +32,13 @@ def fetch_data(spam_keywords):
     ids = []
 
     n = len(rows)
+
+    if n == 0:
+        print("No unread articles")
+        sys.exit()
+    
+    app.run(debug=True)
+
     count = 0
     for row in rows:
         id, title, author, url, content = row
@@ -49,8 +55,19 @@ def fetch_data(spam_keywords):
     return ids, titles, links, authors, contents
 
 def group_entries(contents, threshold):
+    if not contents or all(not content.strip() for content in contents):
+        return []
+
     vectorizer = TfidfVectorizer(stop_words='english')
-    tfidf_matrix = vectorizer.fit_transform(contents)
+    
+    try:
+        tfidf_matrix = vectorizer.fit_transform(contents)
+    except ValueError as e:
+        if str(e) == 'empty vocabulary; perhaps the documents only contain stop words':
+            return []
+        else:
+            raise
+
     cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
     groups = []
@@ -69,85 +86,48 @@ def group_entries(contents, threshold):
 
     return groups
 
-class RSSViewer(QMainWindow):
-    def __init__(self, groups, titles, contents, ids):
-        super().__init__()
-        self.setWindowTitle("RSS Feed Groups")
-        self.setGeometry(100, 100, 1000, 600)
-        self.groups = groups
-        self.titles = titles
-        self.contents = contents
-        self.ids = ids
-
-        # Load Inter font
-        font = QFont("Inter", 10)
-
-        # Create central widget and layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QHBoxLayout(central_widget)
-
-        # Create list widget for group titles
-        self.list_widget = QListWidget()
-        self.list_widget.setFont(font)
-        self.list_widget.currentRowChanged.connect(self.on_list_selection)
-        layout.addWidget(self.list_widget)
-
-        # Create text edit for content display
-        self.text_edit = QTextEdit()
-        self.text_edit.setFont(font)
-        layout.addWidget(self.text_edit)
-
-        # Create slider and label for similarity threshold
-        slider_layout = QVBoxLayout()
-        self.threshold_label = QLabel("Similarity Threshold")
-        self.threshold_label.setFont(font)
-        self.threshold_slider = QSlider(Qt.Horizontal)
-        self.threshold_slider.setMinimum(0)
-        self.threshold_slider.setMaximum(100)
-        self.threshold_slider.setValue(50)
-        self.threshold_slider.setTickInterval(1)
-        self.threshold_slider.setTickPosition(QSlider.TicksBelow)
-        self.threshold_slider.setSingleStep(1)
-        self.threshold_slider.valueChanged.connect(self.on_threshold_change)
-
-        slider_layout.addWidget(self.threshold_label)
-        slider_layout.addWidget(self.threshold_slider)
-        layout.addLayout(slider_layout)
-
-        self.update_groups()
-
-    def on_list_selection(self, index):
-        if index >= 0:
-            group = self.groups[index]
-            self.text_edit.clear()
-            for entry in group:
-                self.text_edit.append(f"Title: {self.titles[entry]}")
-                self.text_edit.append(f"Content: {self.contents[entry]}")
-                self.text_edit.append("="*80)
-                self.text_edit.append("")
-
-    def on_threshold_change(self):
-        threshold = self.threshold_slider.value() / 100.0
-        self.update_groups(threshold)
-
-    def update_groups(self, threshold=0.5):
-        ids, titles, links, authors, contents = fetch_data(spam_keywords)
-        self.groups = group_entries(contents, threshold)
-        self.titles = titles
-        self.contents = contents
-        self.list_widget.clear()
-        for idx, group in enumerate(self.groups):
-            group_title = titles[group[0]]
-            self.list_widget.addItem(f"Group {idx + 1}: {group_title}")
-
-if __name__ == "__main__":
+@app.route('/')
+def index():
     spam_keywords_file = 'spam_keywords.txt'
     spam_keywords = load_spam_keywords(spam_keywords_file)
-    ids, titles, links, authors, contents = fetch_data(spam_keywords)
+    ids, titles, links, _, contents = fetch_data(spam_keywords)
     initial_groups = group_entries(contents, threshold=0.5)
+    
+    # Sort groups by size (largest groups first)
+    sorted_groups = sorted(enumerate(initial_groups), key=lambda x: len(x[1]), reverse=True)
+    sorted_groups = zip(*sorted_groups) if sorted_groups else ([], [])
+    
+    return render_template('index.html', groups=sorted_groups, titles=titles, contents=contents, links=links, ids=ids)
 
-    app = QApplication(sys.argv)
-    viewer = RSSViewer(initial_groups, titles, contents, ids)
-    viewer.show()
-    sys.exit(app.exec_())
+@app.route('/update_groups', methods=['POST'])
+def update_groups():
+    threshold = float(request.form['threshold'])
+    spam_keywords_file = 'spam_keywords.txt'
+    spam_keywords = load_spam_keywords(spam_keywords_file)
+    ids, titles, links, contents = fetch_data(spam_keywords)
+    groups = group_entries(contents, threshold)
+    
+    # Sort groups by size (largest groups first)
+    sorted_groups = sorted(enumerate(groups), key=lambda x: len(x[1]), reverse=True)
+    
+    # Unzip the sorted groups
+    sorted_groups = zip(*sorted_groups) if sorted_groups else ([], [])
+    
+    return jsonify(groups=sorted_groups, titles=titles, contents=contents, links=links, ids=ids)
+
+@app.route('/mark_as_read', methods=['POST'])
+def mark_as_read():
+    ids = request.json.get('ids', [])
+    if not ids:
+        return jsonify({'status': 'error', 'message': 'No IDs provided'}), 400
+
+    conn = sqlite3.connect('/home/polarhive/.local/share/newsboat/cache.db')
+    cursor = conn.cursor()
+    cursor.executemany("UPDATE rss_item SET unread = 0 WHERE id = ?", [(id,) for id in ids])
+    conn.commit()
+    conn.close()
+
+    return jsonify({'status': 'success'})
+
+if __name__ == '__main__':
+    app.run(debug=False)
