@@ -4,7 +4,23 @@ from sklearn.metrics.pairwise import cosine_similarity
 import tkinter as tk
 from tkinter import scrolledtext
 
-# setup
+# Function to read spam keywords from a text file
+def load_spam_keywords(file_path):
+    with open(file_path, 'r') as file:
+        return [line.strip() for line in file]
+
+# Function to check if a string contains any spam keywords
+def is_spam(title, content, spam_keywords):
+    for keyword in spam_keywords:
+        if keyword.lower() in title.lower() or keyword.lower() in content.lower():
+            return True
+    return False
+
+# Load spam keywords from file
+spam_keywords_file = 'spam_keywords.txt'
+spam_keywords = load_spam_keywords(spam_keywords_file)
+
+# Setup
 conn = sqlite3.connect('cache.db')
 cursor = conn.cursor()
 cursor.execute("SELECT * FROM rss_item")
@@ -16,24 +32,31 @@ authors = []
 timestamps = []
 contents = []
 
-# cleanup
-n=50
-for row in rows[:n]:
-    titles.append(row[2])
-    links.append(row[4])
-    authors.append(row[3])
-    timestamps.append(row[6])
-    contents.append(row[7])
+# Cleanup
+n = 50
+count = 0
+for row in rows:
+    title = row[2]
+    content = row[7]
+    if not is_spam(title, content, spam_keywords):
+        titles.append(title)
+        links.append(row[4])
+        authors.append(row[3])
+        timestamps.append(row[6])
+        contents.append(content)
+        count += 1
+    if count >= n:
+        break
 
-# vectorize contents using TF-IDF
+# Vectorize contents using TF-IDF
 vectorizer = TfidfVectorizer(stop_words='english')
 tfidf_matrix = vectorizer.fit_transform(contents)
 
-# cosine similarity matrix
+# Cosine similarity matrix
 cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
-# group similar entries
-threshold = 0.5
+# Group similar entries
+threshold = 0.1
 groups = []
 visited = set()
 
@@ -48,7 +71,7 @@ for i in range(len(contents)):
             visited.add(j)
     groups.append(group)
 
-# GUI
+# Create the GUI
 class RSSViewer(tk.Tk):
     def __init__(self, groups, titles, contents):
         super().__init__()
@@ -57,15 +80,20 @@ class RSSViewer(tk.Tk):
         self.groups = groups
         self.titles = titles
         self.contents = contents
+
+        # Create a listbox to display the groups
         self.listbox = tk.Listbox(self, width=50, height=30)
         self.listbox.pack(side=tk.LEFT, fill=tk.Y)
         self.listbox.bind('<<ListboxSelect>>', self.on_select)
 
+        # Create a scrolled text widget to display the content
         self.text_area = scrolledtext.ScrolledText(self, wrap=tk.WORD, width=80, height=30)
         self.text_area.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
+        # Populate the listbox with group titles
         for idx, group in enumerate(groups):
-            self.listbox.insert(tk.END, f"Group {idx + 1}")
+            group_title = titles[group[0]]
+            self.listbox.insert(tk.END, f"Group {idx + 1}: {group_title}")
 
     def on_select(self, event):
         selected_idx = self.listbox.curselection()[0]
